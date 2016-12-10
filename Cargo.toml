@@ -1,0 +1,12 @@
+[package]
+name = "mould-shared"
+version = "0.0.1"
+authors = ["Denis Kolodin <deniskolodin@gmail.com>"]
+readme = "README.md"
+description = "Shared object to collaborative edit it."
+repository = "https://github.com/DenisKolodin/mould-shared"
+license = "MIT/Apache-2.0"
+
+[dependencies]
+mould = "0.0.18"
+permission = "0.1.0"
