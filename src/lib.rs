@@ -47,6 +47,7 @@ impl<T> Service<T> for SharedService where T: HasPermission<SharedPermission> {
 }
 
 struct UpdateWorker {
+    drop_name: Option<String>,
     attach: bool,
     objects: Objects,
     object: Weak<Object>,
@@ -55,9 +56,19 @@ struct UpdateWorker {
 impl UpdateWorker {
     fn new(objects: Objects, attach: bool) -> Self {
         UpdateWorker {
+            drop_name: None,
             attach: attach,
             objects: objects,
             object: Weak::new(),
+        }
+    }
+}
+
+impl Drop for UpdateWorker {
+    fn drop(&mut self) {
+        if let Some(ref name) = self.drop_name {
+            let mut objects = self.objects.lock().unwrap();
+            objects.remove(name);
         }
     }
 }
@@ -77,7 +88,8 @@ impl<T> Worker<T> for UpdateWorker where T: HasPermission<SharedPermission> {
             }
             let object = Arc::new(object);
             self.object = Arc::downgrade(&object);
-            objects.insert(name, object);
+            objects.insert(name.clone(), object);
+            self.drop_name = Some(name);
         } else {
             let objects = self.objects.lock().unwrap();
             match objects.get(&name) {
