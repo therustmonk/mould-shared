@@ -5,7 +5,7 @@ extern crate mould;
 extern crate permission;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Weak, Mutex};
 use mould::prelude::*;
 use mould::rustc_serialize::json::Object;
 use permission::HasPermission;
@@ -36,9 +36,9 @@ impl SharedService {
 impl<T> Service<T> for SharedService where T: HasPermission<SharedPermission> {
     fn route(&self, request: &Request) -> Box<Worker<T>> {
         if request.action == "attach-object" {
-            Box::new(AttachWorker::new(self.objects.clone()))
+            Box::new(UpdateWorker::new(self.objects.clone(), true))
         } else if request.action == "update-object" {
-            Box::new(AttachWorker::new(self.objects.clone()))
+            Box::new(UpdateWorker::new(self.objects.clone(), false))
         } else {
             let msg = format!("Unknown action '{}' for shared service!", request.action);
             Box::new(RejectWorker::new(msg))
@@ -46,23 +46,48 @@ impl<T> Service<T> for SharedService where T: HasPermission<SharedPermission> {
     }
 }
 
-struct AttachWorker {
+struct UpdateWorker {
+    attach: bool,
     objects: Objects,
+    object: Weak<Object>,
 }
 
-impl AttachWorker {
-    fn new(objects: Objects) -> Self {
-        AttachWorker {
+impl UpdateWorker {
+    fn new(objects: Objects, attach: bool) -> Self {
+        UpdateWorker {
+            attach: attach,
             objects: objects,
+            object: Weak::new(),
         }
     }
 }
 
-impl<T> Worker<T> for AttachWorker where T: HasPermission<SharedPermission> {
+impl<T> Worker<T> for UpdateWorker where T: HasPermission<SharedPermission> {
 
     fn prepare(&mut self, context: &mut T, mut request: Request) -> worker::Result<Shortcut> {
         if !context.has_permission(&SharedPermission::CanAttach) {
             return Err("You haven't permissions.".into());
+        }
+        let name: String = request.extract("name").ok_or("name of shared object not set")?;
+        if self.attach {
+            let object: Object = request.extract("object").ok_or("object not provided")?;
+            let mut objects = self.objects.lock().unwrap();
+            if objects.contains_key(&name) {
+                return Ok(Shortcut::Reject(format!("name '{}' already attached", name)));
+            }
+            let object = Arc::new(object);
+            self.object = Arc::downgrade(&object);
+            objects.insert(name, object);
+        } else {
+            let objects = self.objects.lock().unwrap();
+            match objects.get(&name) {
+                Some(object) => {
+                    self.object = Arc::downgrade(&object);
+                },
+                None => {
+                    return Ok(Shortcut::Reject(format!("name '{}' hasn't attached", name)));
+                },
+            }
         }
         Ok(Shortcut::Tuned)
     }
@@ -72,3 +97,4 @@ impl<T> Worker<T> for AttachWorker where T: HasPermission<SharedPermission> {
     }
 
 }
+
